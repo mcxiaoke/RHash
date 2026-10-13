@@ -98,6 +98,8 @@ struct options_t
 	opt_tchar* update_file;   /* hash file to update */
 	char* embed_crc_delimiter;
 	char  path_separator;
+	char* salt;               /* raw salt bytes */
+	size_t salt_size;         /* size of salt in bytes */
 	int   find_max_depth;
 	struct vector_t* files_accept; /* suffixes of files to process */
 	struct vector_t* files_exclude; /* suffixes of files to exclude from processing */

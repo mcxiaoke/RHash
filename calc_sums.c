@@ -239,6 +239,11 @@ int calc_sums(struct file_info* info)
 	}
 
 	re_init_rhash_context(info);
+	if (opt.salt_size > 0) {
+		if (info->hash_mask & hash_id_to_bit64(RHASH_BTIH))
+			die(_("--salt can't be used with BitTorrent hashes\n"));
+		rhash_update(info->rctx, opt.salt, opt.salt_size);
+	}
 	/* store initial msg_size, for correct calculation of percents */
 	info->msg_offset = info->rctx->msg_size;
 

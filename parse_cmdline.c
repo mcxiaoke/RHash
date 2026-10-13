@@ -113,6 +113,8 @@ static void print_help(void)
 	print_help_line("  -r, --recursive  ", _("Process directories recursively.\n"));
 	print_help_line("      --file-list=<file> ", _("Process a list of files.\n"));
 	print_help_line("  -m, --message=<text> ", _("Process the text message.\n"));
+	print_help_line("      --salt=<string> ", _("Add salt before hashing input data.\n"));
+	print_help_line("      --salt-hex=<hex>", _("Add raw binary salt decoded from hex.\n"));
 	print_help_line("      --skip-ok    ", _("Don't print OK messages for successfully verified files.\n"));
 	print_help_line("      --ignore-missing ", _("Ignore missing files, while verifying a hash file.\n"));
 	print_help_line("  -i, --ignore-case  ", _("Ignore case of filenames when updating hash files.\n"));
@@ -366,6 +368,57 @@ static void set_path_separator(options_t* o, char* sep, unsigned param)
 	}
 }
 
+static int hex_char_to_val(char c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	return -1;
+}
+
+static void set_salt(options_t* o, char* value, unsigned param)
+{
+	(void)param;
+	if (value && *value) {
+		size_t len = strlen(value);
+		if (len > 1024)
+			die(_("salt is too long (maximum 1024 bytes)\n"));
+		o->salt = value;
+		o->salt_size = len;
+	} else {
+		o->salt = NULL;
+		o->salt_size = 0;
+	}
+}
+
+static void set_salt_hex(options_t* o, char* value, unsigned param)
+{
+	size_t i;
+	(void)param;
+	if (value && *value) {
+		size_t hex_len = strlen(value);
+		size_t bin_len;
+		char* bin;
+		if ((hex_len & 1) != 0 || hex_len > 2048)
+			die(_("malformed hex salt (must be even length, up to 2048 hex digits)\n"));
+		bin_len = hex_len / 2;
+		bin = (char*)rsh_malloc(bin_len);
+		rsh_vector_add_ptr(opt.mem, bin);
+		for (i = 0; i < bin_len; i++) {
+			int h = hex_char_to_val(value[i * 2]);
+			int l = hex_char_to_val(value[i * 2 + 1]);
+			if (h < 0 || l < 0)
+				die(_("invalid hex character in --salt-hex\n"));
+			bin[i] = (char)((h << 4) | l);
+		}
+		o->salt = bin;
+		o->salt_size = bin_len;
+	} else {
+		o->salt = NULL;
+		o->salt_size = 0;
+	}
+}
+
 /**
  * Function pointer to store an option handler.
  */
@@ -482,6 +535,8 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_UFLG, 'e',   0, "embed-crc",     0, &opt.flags, OPT_EMBED_CRC },
 	{ F_TSTR,   0,   0, "embed-crc-delimiter", 0, &opt.embed_crc_delimiter, 0 },
 	{ F_UFNC,   0,   0, "path-separator", (opt_handler_t)set_path_separator, 0, 0 },
+	{ F_UFNC,   0,   0, "salt",          (opt_handler_t)set_salt, 0, 0 },
+	{ F_UFNC,   0,   0, "salt-hex",      (opt_handler_t)set_salt_hex, 0, 0 },
 	{ F_TOUT, 'o',   0, "output",        0, &opt.output, 0 },
 	{ F_TOUT, 'l',   0, "log",           0, &opt.log,    0 },
 	{ F_UFNC, 'q',   0, "accept",        (opt_handler_t)add_file_suffix, 0, MASK_ACCEPT },
@@ -1061,6 +1116,10 @@ static void apply_cmdline_options(struct parsed_cmd_line_t* cmd_line)
 
 	if (opt.embed_crc_delimiter == 0) opt.embed_crc_delimiter = conf_opt.embed_crc_delimiter;
 	if (!opt.path_separator) opt.path_separator = conf_opt.path_separator;
+	if (!opt.salt && conf_opt.salt) {
+		opt.salt = conf_opt.salt;
+		opt.salt_size = conf_opt.salt_size;
+	}
 	if (opt.flags & OPT_EMBED_CRC) add_hash_id(&opt, RHASH_CRC32);
 	if (!opt.openssl_mask) opt.openssl_mask = conf_opt.openssl_mask;
 	if (opt.find_max_depth < 0) opt.find_max_depth = conf_opt.find_max_depth;
@@ -1208,6 +1267,8 @@ static void make_final_options_checks(void)
 		opt.mode = MODE_DEFAULT;
 	if (IS_MODE(MODE_TORRENT))
 		add_hash_id(&opt, RHASH_BTIH);
+	if (opt.salt_size && (IS_MODE(MODE_TORRENT) || (opt.hash_mask & RHASH_BTIH)))
+		die(_("--salt can't be used with BitTorrent hashes\n"));
 
 	/* check options compatibility for program mode and output format */
 	if (opt.mode & ~(MODE_CHECK | MODE_UPDATE))

@@ -21,3 +21,4 @@ config.mak
 *.so
 *.so.0
 *.log
+temp/
