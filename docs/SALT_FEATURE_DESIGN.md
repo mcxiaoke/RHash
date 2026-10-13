@@ -1,7 +1,7 @@
 # RHash 哈希加盐（Salt）功能设计方案
 
 ## 1. 目标与背景
-为 RHash 命令行工具新增 `--salt` 与 `--salt-hex` 参数，支持在哈希计算前混入用户自定义的 Salt 数据：
+为 RHash 命令行工具新增 `--salt`、`--salt-hex` 与 `--salt-file` 参数，支持在哈希计算前混入用户自定义的 Salt 数据：
 1. 产生不同于公开发布的标准哈希摘要（防彩虹表/公共库比对）；
 2. 对相同的 Salt 和输入数据，输出严格稳定且可重现；
 3. 支持大文件、多文件、流式输入（stdin）、消息模式（`-m`）以及校验模式（`-c`）；
@@ -24,6 +24,7 @@
 2. **选项表注册**：
    - `--salt=<string>`：使用 `F_UFNC` 处理，Windows 下自动转为 UTF-8 编码，跨平台字节序一致。
    - `--salt-hex=<hex>`：使用 `F_UFNC` 处理，解析 16 进制字符串为原始二进制字节，支持任意字节序列（包括 `\0` 等不可打印字符），内存交由 `opt.mem` 统一管理回收。
+   - `--salt-file=<file>`：使用 `F_TFNC` 处理，原生支持跨平台宽字符/UTF-8 路径。以二进制模式完整读取指定文件内容作为 Salt（最大安全上限 1GB，支持包含 `\0` 等二进制内容），内存接入 `opt.mem` 统一管理回收。后指定的选项（`--salt` / `--salt-hex` / `--salt-file`）自动覆盖前指定的选项。
 3. **配置合并与时序校验**：
    - 在 `apply_cmdline_options()` 中增加 `conf_opt.salt` 到 `opt.salt` 的合并，支持配置文件 `rhashrc`。
    - 在 `make_final_options_checks()` 中校验互斥条件：禁止与 `--torrent` / `RHASH_BTIH` 联合使用（BitTorrent piece 结构不兼容加盐）。
@@ -50,7 +51,9 @@ RHash 内部通过 `info->msg_offset` 记录开始处理文件内容前的字节
 
 ## 4. 第三方验证方案
 使用 Python 标准库 `hashlib` 及第三方通用实现编写独立测试脚本：
-对于任意输入 `Data` 和 `Salt`，Python 使用标准逻辑：
-`hashlib.<alg>(salt.encode('utf-8') + data).hexdigest()`
-对比 `rhash --salt=<salt> --<alg> <file>` 的输出，验证两者完全逐字一致。
-覆盖算法包括：MD5、SHA1、SHA256、SHA512、SHA3-256、BLAKE2b、BLAKE2s 等。
+对于任意输入 `Data` 和 `Salt`（无论是来自 `--salt` 字符串、`--salt-hex` 16进制、还是 `--salt-file` 二进制文件），Python 使用标准逻辑：
+`hashlib.<alg>(salt_bytes + data_bytes).hexdigest()`
+对比 `rhash --salt... --<alg> <file>` 的输出，验证两者完全逐字一致。
+覆盖算法包括：MD5、SHA1、SHA224、SHA256、SHA384、SHA512、SHA3-256、SHA3-512、BLAKE2b、BLAKE2s、CRC32 等。
+此外对空 Salt 文件、包含 `\0` 字节的二进制 Salt 文件、超过 1MB 安全上限拦截以及不存在文件的异常报错均进行了自动化验证。
+

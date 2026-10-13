@@ -115,6 +115,7 @@ static void print_help(void)
 	print_help_line("  -m, --message=<text> ", _("Process the text message.\n"));
 	print_help_line("      --salt=<string> ", _("Add salt before hashing input data.\n"));
 	print_help_line("      --salt-hex=<hex>", _("Add raw binary salt decoded from hex.\n"));
+	print_help_line("      --salt-file=<file>", _("Read salt data from the specified file.\n"));
 	print_help_line("      --skip-ok    ", _("Don't print OK messages for successfully verified files.\n"));
 	print_help_line("      --ignore-missing ", _("Ignore missing files, while verifying a hash file.\n"));
 	print_help_line("  -i, --ignore-case  ", _("Ignore case of filenames when updating hash files.\n"));
@@ -419,6 +420,57 @@ static void set_salt_hex(options_t* o, char* value, unsigned param)
 	}
 }
 
+static void set_salt_file(options_t* o, tstr_t path, unsigned param)
+{
+	file_t file;
+	FILE* fd;
+	char* buf;
+	size_t size = 0;
+	size_t allocated = 4096;
+	size_t n;
+	(void)param;
+
+	if (!path || !*path) {
+		o->salt = NULL;
+		o->salt_size = 0;
+		return;
+	}
+
+	file_init(&file, path, FileInitReusePath);
+	fd = file_fopen(&file, FOpenRead | FOpenBin);
+	if (!fd) {
+		die(_("can't open salt file: %s\n"), file_get_print_path(&file, FPathPrimaryEncoding | FPathNotNull));
+	}
+
+	buf = (char*)rsh_malloc(allocated);
+
+	while (!feof(fd)) {
+		if (size == allocated) {
+			if (allocated >= (size_t)1024 * 1024 * 1024) { /* maximum 1GB salt file */
+				fclose(fd);
+				free(buf);
+				file_cleanup(&file);
+				die(_("salt file is too large (maximum 1GB)\n"));
+			}
+			allocated *= 2;
+			buf = (char*)rsh_realloc(buf, allocated);
+		}
+		n = fread(buf + size, 1, allocated - size, fd);
+		if (ferror(fd)) {
+			fclose(fd);
+			free(buf);
+			die(_("error reading salt file: %s\n"), file_get_print_path(&file, FPathPrimaryEncoding | FPathNotNull));
+		}
+		size += n;
+	}
+	fclose(fd);
+	file_cleanup(&file);
+
+	rsh_vector_add_ptr(opt.mem, buf);
+	o->salt = buf;
+	o->salt_size = size;
+}
+
 /**
  * Function pointer to store an option handler.
  */
@@ -537,6 +589,7 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_UFNC,   0,   0, "path-separator", (opt_handler_t)set_path_separator, 0, 0 },
 	{ F_UFNC,   0,   0, "salt",          (opt_handler_t)set_salt, 0, 0 },
 	{ F_UFNC,   0,   0, "salt-hex",      (opt_handler_t)set_salt_hex, 0, 0 },
+	{ F_TFNC,   0,   0, "salt-file",     (opt_handler_t)set_salt_file, 0, 0 },
 	{ F_TOUT, 'o',   0, "output",        0, &opt.output, 0 },
 	{ F_TOUT, 'l',   0, "log",           0, &opt.log,    0 },
 	{ F_UFNC, 'q',   0, "accept",        (opt_handler_t)add_file_suffix, 0, MASK_ACCEPT },
